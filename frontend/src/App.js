@@ -14,11 +14,12 @@ function App() {
 
   const [projectInfo, setProjectInfo] = useState({
     name: 'Infra-Forge-Project',
-    repoUrl: 'https://github.com/yutju/sixsenste-iac', 
+    repoUrl: '', // ✅ GitHub 레포지토리 기본값 제거
+    imageTag: 'latest', 
     cfToken: '',      
     cfZoneId: '',    
     cfTunnelId: '',  
-    baseDomain: 'example.com' 
+    baseDomain: '' // ✅ 하단 상태바 깔끔함을 위해 기본 도메인도 빈 값으로 설정
   });
 
   const [envs, setEnvs] = useState({
@@ -32,12 +33,19 @@ function App() {
   }, [logs]);
 
   const handleDeploy = async () => {
+    // 유효성 검사: 레포지토리 주소 확인
+    if (!projectInfo.repoUrl.trim()) {
+      alert("❌ GitHub Repository URL을 입력해 주세요!");
+      return;
+    }
+
     setLogs([`🚀 [Step 2] Initiating reconciliation for ${activeEnv.toUpperCase()}...`]);
     setDownloadUrl(null);
 
     const payload = {
       project_name: projectInfo.name,
       repo_url: projectInfo.repoUrl,
+      image_tag: projectInfo.imageTag,
       env_type: activeEnv,
       env_vars: envs[activeEnv].envVars,
       replica: parseInt(envs[activeEnv].replica),
@@ -45,7 +53,9 @@ function App() {
         token: projectInfo.cfToken,
         zone_id: projectInfo.cfZoneId,
         tunnel_id: projectInfo.cfTunnelId,
-        domain: `${activeEnv === 'prod' ? 'www' : activeEnv}.${projectInfo.baseDomain}`
+        domain: projectInfo.baseDomain 
+          ? `${activeEnv === 'prod' ? 'www' : activeEnv}.${projectInfo.baseDomain}`
+          : ""
       }
     };
 
@@ -90,12 +100,13 @@ function App() {
     setProjectInfo({ ...projectInfo, [field]: value });
   };
 
-  // ✅ 핵심 수정 부분: 텍스트 잘림 방지를 위한 스타일 및 간격 조정
   const getDiagramCode = () => {
     const isProd = activeEnv === 'prod';
     const envLabel = activeEnv.toUpperCase();
     const themeColor = envs[activeEnv].color;
-    const currentDomain = `${activeEnv === 'prod' ? 'www' : activeEnv}.${projectInfo.baseDomain}`;
+    const currentDomain = projectInfo.baseDomain 
+      ? `${activeEnv === 'prod' ? 'www' : activeEnv}.${projectInfo.baseDomain}`
+      : "Not Configured";
     
     return `%%{init: {
         'theme': 'base', 
@@ -111,8 +122,8 @@ function App() {
           'htmlLabels': true, 
           'curve': 'basis',
           'nodeSpacing': 60,
-          'rankSpacing': 90,
-          'padding': 20
+          'rankSpacing': 100,
+          'padding': 30
         }
       }}%%
       graph LR
@@ -131,16 +142,16 @@ function App() {
           ${isProd ? `
             Caddy -->|Active| Blue
             Caddy -.->|Standby| Green
-            Blue["📦 Prod-Slot: BLUE"]
-            Green["📦 Prod-Slot: GREEN"]
-            DB["🗄️ K8s Service: DB"]
+            Blue["📦 Prod-Slot: BLUE "]
+            Green["📦 Prod-Slot: GREEN "]
+            DB["🗄️ K8s Service: DB "]
             Blue --> DB
             Green --> DB
           ` : `
-            Caddy --> Svc["🔌 K8s Service<br/>${envLabel}"]
-            Svc --> Pod1["📦 App Pod<br/>(Replica 1)"]
-            ${envs[activeEnv].replica > 1 ? `Svc --> Pod2["📦 App Pod<br/>(Replica 2+)"]` : ''}
-            DB["🗄️ K8s Service: DB"]
+            Caddy --> Svc["🔌 K8s Service<br/>${envLabel} "]
+            Svc --> Pod1["📦 App Pod<br/>(Replica 1) "]
+            ${envs[activeEnv].replica > 1 ? `Svc --> Pod2["📦 App Pod<br/>(Replica 2+) "]` : ''}
+            DB["🗄️ K8s Service: DB "]
             Svc --> DB
           `}
         end
@@ -176,7 +187,22 @@ function App() {
           <div className="config-card" style={{ borderColor: envs[activeEnv].color }}>
             <div className="form-group">
               <label>App Repository URL (Repo B)</label>
-              <input type="text" value={projectInfo.repoUrl} onChange={(e) => handleProjectInfoChange('repoUrl', e.target.value)} />
+              <input 
+                type="text" 
+                value={projectInfo.repoUrl} 
+                onChange={(e) => handleProjectInfoChange('repoUrl', e.target.value)} 
+                placeholder="GitHub 레포지토리 주소를 입력하세요" 
+              />
+            </div>
+
+            <div className="form-group">
+              <label>App Image Tag (Branch/Version)</label>
+              <input 
+                type="text" 
+                value={projectInfo.imageTag} 
+                onChange={(e) => handleProjectInfoChange('imageTag', e.target.value)} 
+                placeholder="예: latest, v1.0.1, main"
+              />
             </div>
 
             <div className="form-section-title">🌐 Cloudflare Reconciler</div>
@@ -202,7 +228,7 @@ function App() {
               <label>Tunnel ID / Base Domain</label>
               <div style={{ display: 'flex', gap: '5px' }}>
                 <input type="text" placeholder="Tunnel ID" value={projectInfo.cfTunnelId} onChange={(e) => handleProjectInfoChange('cfTunnelId', e.target.value)} />
-                <input type="text" placeholder="Domain" value={projectInfo.baseDomain} onChange={(e) => handleProjectInfoChange('baseDomain', e.target.value)} />
+                <input type="text" placeholder="Base Domain (예: example.com)" value={projectInfo.baseDomain} onChange={(e) => handleProjectInfoChange('baseDomain', e.target.value)} />
               </div>
             </div>
             
@@ -280,7 +306,16 @@ function App() {
           
           <div className="status-bar">
             <p>● Environment: <span style={{color: envs[activeEnv].color, fontWeight: 'bold'}}>{activeEnv.toUpperCase()}</span></p>
-            <p>● Service URL: <a href={`https://${activeEnv === 'prod' ? 'www' : activeEnv}.${projectInfo.baseDomain}`} target="_blank" rel="noreferrer" style={{color: envs[activeEnv].color, fontWeight: 'bold'}}>{activeEnv === 'prod' ? 'www' : activeEnv}.{projectInfo.baseDomain} ↗</a></p>
+            <p>
+              ● Service URL: 
+              {projectInfo.baseDomain ? (
+                <a href={`https://${activeEnv === 'prod' ? 'www' : activeEnv}.${projectInfo.baseDomain}`} target="_blank" rel="noreferrer" style={{color: envs[activeEnv].color, fontWeight: 'bold', marginLeft: '5px'}}>
+                  {activeEnv === 'prod' ? 'www' : activeEnv}.{projectInfo.baseDomain} ↗
+                </a>
+              ) : (
+                <span style={{color: '#666', marginLeft: '5px'}}>도메인을 입력해 주세요</span>
+              )}
+            </p>
             {activeEnv === 'prod' && <p>● Active Slot: <strong style={{color: prodActiveColor === 'blue' ? '#3b82f6' : '#10b981'}}>{prodActiveColor.toUpperCase()}</strong></p>}
           </div>
         </main>
