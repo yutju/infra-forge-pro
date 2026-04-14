@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import './App.css';
 import MermaidViewer from './components/MermaidViewer';
 
@@ -7,9 +7,12 @@ function App() {
   const [prodActiveColor, setProdActiveColor] = useState('blue');
   const [showToken, setShowToken] = useState(false);
   
-  // 추가된 상태: 실시간 로그 및 다운로드 URL
+  // 상태 관리: 실시간 로그 및 다운로드 URL
   const [logs, setLogs] = useState([]);
   const [downloadUrl, setDownloadUrl] = useState(null);
+  
+  // 로그 자동 스크롤을 위한 Ref
+  const logEndRef = useRef(null);
 
   const [projectInfo, setProjectInfo] = useState({
     name: 'Infra-Forge-Project',
@@ -21,14 +24,18 @@ function App() {
   });
 
   const [envs, setEnvs] = useState({
-    dev: { envVars: 'DB_HOST=localhost\nDEBUG=true', replica: 1, color: '#3b82f6' },
-    stage: { envVars: 'DB_HOST=stage-db\nDEBUG=false', replica: 2, color: '#f59e0b' },
-    prod: { envVars: 'DB_HOST=prod-db\nDEBUG=false', replica: 3, color: '#10b981' }
+    dev: { envVars: 'DB_HOST=db-svc\nDEBUG=true', replica: 1, color: '#3b82f6' },
+    stage: { envVars: 'DB_HOST=db-svc\nDEBUG=false', replica: 2, color: '#f59e0b' },
+    prod: { envVars: 'DB_HOST=db-svc\nDEBUG=false', replica: 3, color: '#10b981' }
   });
 
+  // 로그가 추가될 때마다 자동으로 스크롤 하단 이동
+  useEffect(() => {
+    logEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [logs]);
+
   const handleDeploy = async () => {
-    // 배포 시작 시 로그 초기화 및 로딩 메시지
-    setLogs([`Initiating deployment for ${activeEnv.toUpperCase()}...`]);
+    setLogs([`🚀 [Step 2] Initiating reconciliation for ${activeEnv.toUpperCase()}...`]);
     setDownloadUrl(null);
 
     const payload = {
@@ -41,7 +48,7 @@ function App() {
         token: projectInfo.cfToken,
         zone_id: projectInfo.cfZoneId,
         tunnel_id: projectInfo.cfTunnelId,
-        domain: `${activeEnv}.${projectInfo.baseDomain}`
+        domain: `${activeEnv === 'prod' ? 'www' : activeEnv}.${projectInfo.baseDomain}`
       }
     };
 
@@ -55,15 +62,14 @@ function App() {
       const data = await response.json();
 
       if (response.ok) {
-        // 백엔드에서 받은 로그와 다운로드 URL 업데이트
-        setLogs(data.logs || ["Deployment completed successfully."]);
+        setLogs(data.logs || ["Deployment manifests reconciled."]);
         setDownloadUrl(data.download_url);
-        alert(`✅ ${activeEnv.toUpperCase()} 배포 완료!`);
+        alert(`✅ ${activeEnv.toUpperCase()} GitOps 반영 완료!`);
       } else {
-        setLogs([`❌ Error: ${data.detail || "Unknown error occurred"}`]);
+        setLogs([`❌ Error: ${data.detail || "Reconciliation failed"}`]);
       }
     } catch (err) {
-      setLogs(["🚫 Error: Cannot connect to Backend server (localhost:8000)"]);
+      setLogs(["🚫 Error: Backend server unreachable (localhost:8000)"]);
       alert("🚫 백엔드 연결 실패!");
     }
   };
@@ -87,39 +93,67 @@ function App() {
     setProjectInfo({ ...projectInfo, [field]: value });
   };
 
+  // 다이어그램 크기(Scale)와 가독성을 시연용으로 대폭 강화
   const getDiagramCode = () => {
     const isProd = activeEnv === 'prod';
     const envLabel = activeEnv.toUpperCase();
     const themeColor = envs[activeEnv].color;
     const currentDomain = `${activeEnv === 'prod' ? 'www' : activeEnv}.${projectInfo.baseDomain}`;
     
-    return `graph TD
-      classDef vpcBox fill:none,stroke:${themeColor},stroke-width:2px,stroke-dasharray: 5 5;
-      classDef nodeStyle fill:#fff,stroke:#232F3E,stroke-width:2px;
-      classDef activeNode fill:${themeColor},color:#fff,stroke-width:3px;
+    // %%{init: ...}%% 구문에서 fontSize와 가독성 관련 변수를 대폭 상향 조정했습니다.
+    return `%%{init: {
+        'theme': 'base', 
+        'themeVariables': { 
+          'fontSize': '24px', 
+          'fontFamily': 'Pretendard, sans-serif',
+          'primaryColor': '#fff',
+          'edgeLabelBackground':'#ffffff',
+          'mainBkg': '#ffffff',
+          'nodeBorder': '${themeColor}',
+          'lineColor': '#232F3E'
+        },
+        'flowchart': { 
+          'htmlLabels': true, 
+          'curve': 'basis',
+          'nodeSpacing': 80,
+          'rankSpacing': 120,
+          'useMaxWidth': false
+        }
+      }}%%
+      graph TD
+      classDef clusterBox fill:none,stroke:${themeColor},stroke-width:4px,stroke-dasharray: 10 5;
+      classDef nodeStyle fill:#fff,stroke:#232F3E,stroke-width:3px,rx:15,ry:15;
+      classDef activeNode fill:${themeColor},color:#fff,stroke-width:5px,rx:15,ry:15;
 
-      subgraph AWS_Cloud [AWS Cloud: ${envLabel}]
-        direction TB
-        subgraph VPC [VPC 영역]
-          ${isProd ? `
-            Caddy["🌐 Caddy (Proxy)"]
-            Caddy -->|Active| Blue
-            Caddy -.->|Standby| Green
-            Blue["🔹 Prod-V1"]
-            Green["🌿 Prod-V2"]
-            RDS["🗄️ RDS Cluster"]
-            Blue & Green --> RDS
-          ` : `
-            EC2["🖥️ ${envLabel} Server"]
-            RDS["🗄️ ${envLabel} DB"]
-            EC2 --> RDS
-          `}
-        end
-        Tunnel((☁️ CF Tunnel: ${currentDomain})) --> ${isProd ? 'Caddy' : 'EC2'}
+      subgraph External [Internet Access]
+        User((User)) --> CF((☁️ Cloudflare Tunnel: ${currentDomain}))
       end
 
-      class VPC vpcBox;
-      class EC2,RDS,Caddy,Blue,Green nodeStyle;
+      subgraph Platform [idea Control Plane]
+        direction TB
+        CF --> Caddy["🌐 Platform Caddy (Reverse Proxy)"]
+        
+        subgraph Cluster [kind Cluster: ${envLabel}]
+          direction TB
+          ${isProd ? `
+            Caddy -->|Active| Blue
+            Caddy -.->|Standby| Green
+            Blue["📦 Prod-Slot: BLUE"]
+            Green["📦 Prod-Slot: GREEN"]
+            DB["🗄️ K8s Service: DB"]
+            Blue & Green --> DB
+          ` : `
+            Caddy --> Svc["🔌 K8s Service: ${envLabel}"]
+            Svc --> Pod1["📦 App Pod (Replica 1)"]
+            ${envs[activeEnv].replica > 1 ? `Svc --> Pod2["📦 App Pod (Replica 2+)"]` : ''}
+            DB["🗄️ K8s Service: DB"]
+            Svc --> DB
+          `}
+        end
+      end
+
+      class Cluster clusterBox;
+      class CF,Caddy,Svc,Pod1,Pod2,Blue,Green,DB nodeStyle;
       ${isProd ? `class ${prodActiveColor === 'blue' ? 'Blue' : 'Green'} activeNode;` : ''}
     `;
   };
@@ -128,11 +162,14 @@ function App() {
     <div className="app-container">
       <header className="app-header">
         <h1>🏗️ Infra-Forge <span className="version-tag">Professional</span></h1>
+        <div className="header-right-status">
+            <span className="live-status"><span className="status-dot green"></span> System Online</span>
+        </div>
       </header>
 
       <div className="content-layout">
         <aside className="sidebar">
-          <h3 className="sidebar-title">환경 및 인프라 설정</h3>
+          <h3 className="sidebar-title">환경 및 GitOps 설정</h3>
           
           <div className="env-selector">
             {['dev', 'stage', 'prod'].map(env => (
@@ -144,13 +181,13 @@ function App() {
 
           <div className="config-card" style={{ borderColor: envs[activeEnv].color }}>
             <div className="form-group">
-              <label>GitHub Repository URL</label>
+              <label>App Repository URL (Repo B)</label>
               <input type="text" value={projectInfo.repoUrl} onChange={(e) => handleProjectInfoChange('repoUrl', e.target.value)} />
             </div>
 
-            <div className="form-section-title">🌐 Cloudflare Network</div>
+            <div className="form-section-title">🌐 Cloudflare Reconciler</div>
             <div className="form-group">
-              <label>API Token</label>
+              <label>Cloudflare API Token</label>
               <div style={{ position: 'relative' }}>
                 <input 
                   type={showToken ? "text" : "password"} 
@@ -177,93 +214,75 @@ function App() {
             
             {activeEnv === 'prod' && (
               <div className="form-group animate-fade">
-                <label>Active Slot Control</label>
+                <label>Blue-Green Traffic Control</label>
                 <div className="env-selector">
-                  <button className={`env-btn ${prodActiveColor === 'blue' ? 'selected dev' : ''}`} onClick={() => handleTrafficSwitch('blue')}>BLUE (V1)</button>
-                  <button className={`env-btn ${prodActiveColor === 'green' ? 'selected prod' : ''}`} onClick={() => handleTrafficSwitch('green')}>GREEN (V2)</button>
+                  <button className={`env-btn ${prodActiveColor === 'blue' ? 'selected dev' : ''}`} onClick={() => handleTrafficSwitch('blue')}>BLUE (Active)</button>
+                  <button className={`env-btn ${prodActiveColor === 'green' ? 'selected prod' : ''}`} onClick={() => handleTrafficSwitch('green')}>GREEN (Standby)</button>
                 </div>
               </div>
             )}
 
             <div className="form-group">
-              <label>{activeEnv.toUpperCase()} Env Variables</label>
+              <label>{activeEnv.toUpperCase()} Runtime Env (.env)</label>
               <textarea rows="4" value={envs[activeEnv].envVars} onChange={(e) => handleInputChange('envVars', e.target.value)} />
             </div>
 
             <div className="form-group">
-              <label>Target Replicas</label>
+              <label>Target Replicas (K8s Pods)</label>
               <input type="number" value={envs[activeEnv].replica} onChange={(e) => handleInputChange('replica', e.target.value)} />
             </div>
           </div>
 
           <button className="main-deploy-btn" style={{ backgroundColor: envs[activeEnv].color }} onClick={handleDeploy}>
-            DEPLOY TO {activeEnv.toUpperCase()}
+            RECONCILE TO {activeEnv.toUpperCase()}
           </button>
 
-          {/* 추가된 기능: 다운로드 버튼 (성공 시 노출) */}
           {downloadUrl && (
             <a href={downloadUrl} className="download-btn-link" style={{ 
               display: 'block', 
               marginTop: '10px', 
               padding: '12px', 
-              backgroundColor: '#28a745', 
+              backgroundColor: '#10b981', 
               color: 'white', 
               textAlign: 'center', 
               textDecoration: 'none', 
-              borderRadius: '6px',
+              borderRadius: '8px',
               fontWeight: 'bold',
-              fontSize: '14px'
+              fontSize: '14px',
+              boxShadow: '0 4px 6px rgba(16, 185, 129, 0.2)'
             }}>
-              📦 DOWNLOAD IAC PACKAGE
+              📦 DOWNLOAD GITOPS BUNDLE
             </a>
           )}
-
-          <div className="sidebar-footer-status">
-              <div className="status-item"><span className="status-dot green"></span> Argo CD: Connected</div>
-              <div className="status-item"><span className="status-dot green"></span> CF Tunnel: Active</div>
-          </div>
         </aside>
 
         <main className="main-view">
           <div className="view-header">
-            <h3>Infrastructure Topology</h3>
-            <span className="live-badge">LIVE PREVIEW</span>
+            <h3>Infrastructure Topology (kind Cluster)</h3>
+            <span className="live-badge">STEP 4: LIVE ROUTING</span>
           </div>
+          
           <div className="mermaid-wrapper">
+            {/* MermaidViewer 내부에서 svg가 꽉 차도록 MermaidViewer.js도 체크가 필요할 수 있습니다. */}
             <MermaidViewer chartCode={getDiagramCode()} />
           </div>
 
-          {/* 추가된 기능: 실시간 시스템 콘솔 */}
-          <div className="console-wrapper" style={{
-            marginTop: '20px',
-            backgroundColor: '#1e1e1e',
-            borderRadius: '8px',
-            border: '1px solid #333',
-            overflow: 'hidden'
-          }}>
-            <div style={{ backgroundColor: '#333', padding: '5px 15px', color: '#aaa', fontSize: '12px', fontFamily: 'monospace' }}>
-              SYSTEM_LOG_STREAM
+          <div className="console-wrapper">
+            <div className="console-header">
+              RECONCILIATION_LOG_STREAM
             </div>
-            <div className="console-content" style={{
-              height: '150px',
-              padding: '15px',
-              color: '#00ff00',
-              fontFamily: 'monospace',
-              fontSize: '13px',
-              overflowY: 'auto',
-              textAlign: 'left',
-              lineHeight: '1.6'
-            }}>
-              {logs.length === 0 && <span style={{color: '#555'}}>Waiting for deployment signal...</span>}
+            <div className="console-content">
+              {logs.length === 0 && <span style={{color: '#444'}}>Waiting for reconciliation signal...</span>}
               {logs.map((log, i) => (
-                <div key={i}><span style={{color: '#888'}}>>>></span> {log}</div>
+                <div key={i}><span style={{color: '#555'}}>>>></span> {log}</div>
               ))}
+              <div ref={logEndRef} />
             </div>
           </div>
           
           <div className="status-bar">
-            <p>● Status: <span style={{color: envs[activeEnv].color}}>Active</span></p>
-            <p>● URL: <a href={`https://${activeEnv === 'prod' ? 'www' : activeEnv}.${projectInfo.baseDomain}`} target="_blank" rel="noreferrer" style={{color: envs[activeEnv].color, fontWeight: 'bold'}}>{activeEnv === 'prod' ? 'www' : activeEnv}.{projectInfo.baseDomain} ↗</a></p>
+            <p>● Environment: <span style={{color: envs[activeEnv].color, fontWeight: 'bold'}}>{activeEnv.toUpperCase()}</span></p>
+            <p>● Service URL: <a href={`https://${activeEnv === 'prod' ? 'www' : activeEnv}.${projectInfo.baseDomain}`} target="_blank" rel="noreferrer" style={{color: envs[activeEnv].color, fontWeight: 'bold'}}>{activeEnv === 'prod' ? 'www' : activeEnv}.{projectInfo.baseDomain} ↗</a></p>
             {activeEnv === 'prod' && <p>● Active Slot: <strong style={{color: prodActiveColor === 'blue' ? '#3b82f6' : '#10b981'}}>{prodActiveColor.toUpperCase()}</strong></p>}
           </div>
         </main>
